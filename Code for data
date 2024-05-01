@@ -1,0 +1,670 @@
+#%%
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+import seaborn as sns
+from statsmodels.stats.descriptivestats import describe
+import statsmodels.tsa.api as smt
+import statsmodels.api as sm
+from statsmodels.graphics.gofplots import ProbPlot
+import statsmodels.tsa.stattools as stat
+from statsmodels.tsa.vector_ar.vecm import VECM
+from statsmodels.tsa.vector_ar.vecm import select_coint_rank
+import statsmodels.tsa.vector_ar.vecm as sv
+
+pd.options.display.float_format = '{:.2f}'.format
+np.set_printoptions(suppress=True)
+from statsmodels.tsa.vector_ar.vecm import select_order
+#%%
+brent1 = pd.read_csv('brent1.csv')
+brent2 = pd.read_csv('brent2.csv')
+f = [brent2, brent1]
+bfuture = pd.concat(f)
+bfuture.set_index('Date', inplace=True)
+
+bspot = pd.read_csv('bspot.csv')
+bspot.drop(9360, inplace=True)
+bspot.set_index('Date', inplace=True)
+bfuture = bfuture['Price']
+bfuture
+#%%
+bspot
+#%%
+f = bfuture.drop(bfuture.index[0:7])
+f = f.to_frame()
+f.columns.values[0] = "futures"
+f = f.iloc[::-1]
+#%%
+s = bspot.drop(bspot.index[0:281])
+#s = s.iloc[::-1]
+s.columns.values[0] = "spot"
+s
+#%%
+f.index = pd.to_datetime(f.index).strftime('%B %d, %Y')
+s.index = pd.to_datetime(s.index).strftime('%B %d, %Y')
+#%%
+df = f.join(s, how='inner')
+#df = np.log(df)
+df
+#%%
+describe(df)
+#%%
+from statsmodels.tsa.stattools import adfuller
+
+def adf_test(timeseries):
+    print("Results of Dickey-Fuller Test:")
+    dftest = adfuller(timeseries, autolag="AIC")
+    dfoutput = pd.Series(
+        dftest[0:4],
+        index=[
+            "Test Statistic",
+            "p-value",
+            "#Lags Used",
+            "Number of Observations Used",
+        ],
+    )
+    for key, value in dftest[4].items():
+        dfoutput["Critical Value (%s)" % key] = value
+    print("H0: There exists unit root")
+    print(dfoutput)
+adf_test(df['futures'])
+#%%
+from statsmodels.tsa.stattools import kpss
+
+
+def kpss_test(timeseries):
+    print("Results of KPSS Test:")
+    kpsstest = kpss(timeseries, regression="c", nlags="auto")
+    kpss_output = pd.Series(
+        kpsstest[0:3], index=["Test Statistic", "p-value", "Lags Used"]
+    )
+    for key, value in kpsstest[3].items():
+        kpss_output["Critical Value (%s)" % key] = value
+    print("H0: There is NO unit root")
+    print(kpss_output)
+kpss_test(df['futures'])
+#%%
+df.to_csv(f"/Users/cutie/PycharmProjects/Prices.csv")
+#%%
+# Step 5: Fit the VECM model
+model = VECM(df, k_ar_diff=10, deterministic = "lo")
+result = model.fit()
+
+# Step 6: Inspect the results
+print(result.summary())
+
+#%%
+coint = sv.coint_johansen(df, 0, 0)
+coint.trace_stat
+
+
+#%%
+coint.trace_stat_crit_vals
+#%%
+df
+#%%
+subset1 = df.loc["June 27, 1988":"December 21, 1989"]
+subset2 = df.loc["December 22, 1989":"July 07, 1992"]
+subset3 = df.loc["July 08, 1992":"January 16, 1998"]
+subset4 = df.loc["January 19, 1998":"April 18, 2002"]
+subset5 = df.loc["April 19, 2002":"October 10, 2007"]
+subset6 = df.loc["October 11, 2007":"May 11, 2010"]
+subset7 = df.loc["May 12, 2010":"September 22, 2014"]
+subset8 = df.loc["September 23, 2014":"August 21, 2017"]
+subset9 = df.loc["August 22, 2017":"March 26, 2020"]
+subset10 = df.loc["March 27, 2020":"April 08, 2024"]
+
+#%%
+import matplotlib.pyplot as plt
+
+# Plotting the time series with vertical lines for subset split dates
+plt.figure(figsize=(12, 6))
+
+# Plot the entire DataFrame
+plt.plot(df.index, df['spot'], color='blue', label='Your Variable')
+
+# Plot vertical lines for subset start dates
+subset_splits = [
+    "June 27, 1988", "December 21, 1989",
+    "December 22, 1989", "July 07, 1992",
+    "July 08, 1992", "January 16, 1998",
+    "January 19, 1998", "April 18, 2002",
+    "April 19, 2002", "October 10, 2007",
+    "October 11, 2007", "May 11, 2010",
+    "May 12, 2010", "September 22, 2014",
+    "September 23, 2014", "August 21, 2017",
+    "August 22, 2017", "March 26, 2020",
+]
+
+for split_date in subset_splits:
+    plt.axvline(x=split_date, color='red', linestyle='--')
+
+# Set x-axis ticks to show the first and last date of each subset
+subset_ticks = [subset_splits[0]] + subset_splits[1::2] + [subset_splits[-1]]
+plt.xticks(subset_ticks, rotation=45)
+plt.xlim(df.index[0], df.index[-1])
+
+# Add labels and legend
+plt.title('Brent crude daily spot prices')
+plt.xlabel('June 27, 1988 - April 08, 2024')
+plt.ylabel('Dollar/Barrel')
+
+plt.savefig('brent_spot.png', bbox_inches='tight')
+# Show plot
+plt.tight_layout()
+plt.show()
+
+#%%
+from scipy.stats import jarque_bera, skew, kurtosis
+
+# Define the subsets (assuming you already have them)
+subsets = [subset1, subset2, subset3, subset4, subset5, subset6, subset7, subset8, subset9, subset10]
+
+# Define column names for the tables
+columns = ['Mean', 'Std', 'Min', '25%', '50%', '75%', 'Max', 'Jarque-Bera', 'Skew', 'Kurtosis']
+
+# Initialize empty dictionaries to store descriptive statistics for spot and futures prices
+spot_data = {}
+futures_data = {}
+
+# Calculate descriptive statistics for each subset
+for i, subset in enumerate(subsets, start=1):
+    # Calculate spot statistics
+    spot_stats = {
+        'Mean': subset['spot'].mean(),
+        'Std': subset['spot'].std(),
+        'Min': subset['spot'].min(),
+        '25%': subset['spot'].quantile(0.25),
+        '50%': subset['spot'].median(),
+        '75%': subset['spot'].quantile(0.75),
+        'Max': subset['spot'].max(),
+        'Jarque-Bera': jarque_bera(subset['spot'])[0],
+        'Skew': skew(subset['spot']),
+        'Kurtosis': kurtosis(subset['spot'])
+    }
+    spot_data[f'Subset {i}'] = spot_stats
+
+    # Calculate futures statistics
+    futures_stats = {
+        'Mean': subset['futures'].mean(),
+        'Std': subset['futures'].std(),
+        'Min': subset['futures'].min(),
+        '25%': subset['futures'].quantile(0.25),
+        '50%': subset['futures'].median(),
+        '75%': subset['futures'].quantile(0.75),
+        'Max': subset['futures'].max(),
+        'Jarque-Bera': jarque_bera(subset['futures'])[0],
+        'Skew': skew(subset['futures']),
+        'Kurtosis': kurtosis(subset['futures'])
+    }
+    futures_data[f'Subset {i}'] = futures_stats
+
+# Create DataFrames from the dictionaries
+spot_df = pd.DataFrame.from_dict(spot_data, orient='index', columns=columns)
+futures_df = pd.DataFrame.from_dict(futures_data, orient='index', columns=columns)
+
+# Display the descriptive statistics tables
+print("Spot Prices Descriptive Statistics:")
+print(spot_df)
+
+print("\nFutures Prices Descriptive Statistics:")
+print(futures_df)
+
+
+#%%
+from docx import Document
+from docx.shared import Inches
+
+# Define a function to format values to have a maximum of 4 decimal places
+def format_value(value):
+    if isinstance(value, float):
+        return "{:.4f}".format(value)
+    else:
+        return str(value)
+
+# Create a new Word document
+doc = Document()
+
+# Add a title
+doc.add_heading('Descriptive Statistics', level=1)
+
+# Add a table for spot prices descriptive statistics
+spot_table = doc.add_table(rows=len(spot_df) + 1, cols=len(spot_df.columns))
+spot_table.style = 'Table Grid'
+
+# Add column headers
+for col_idx, column in enumerate(spot_df.columns):
+    spot_table.cell(0, col_idx).text = column
+
+# Add data rows
+for row_idx, row in enumerate(spot_df.iterrows(), start=1):
+    for col_idx, value in enumerate(row[1]):
+        spot_table.cell(row_idx, col_idx).text = format_value(value)
+
+# Add a table for futures prices descriptive statistics
+futures_table = doc.add_table(rows=len(futures_df) + 1, cols=len(futures_df.columns))
+futures_table.style = 'Table Grid'
+
+# Add column headers
+for col_idx, column in enumerate(futures_df.columns):
+    futures_table.cell(0, col_idx).text = column
+
+# Add data rows
+for row_idx, row in enumerate(futures_df.iterrows(), start=1):
+    for col_idx, value in enumerate(row[1]):
+        futures_table.cell(row_idx, col_idx).text = format_value(value)
+
+# Save the Word document
+doc.save('descriptive_statistics.docx')
+#%%
+import openpyxl
+spot_df.to_excel('spot_prices_descriptive_statistics.xlsx', index=True)
+futures_df.to_excel('futures_prices_descriptive_statistics.xlsx', index=True)
+#%%
+from statsmodels.tsa.stattools import adfuller, kpss
+import pandas as pd
+
+# Define a function to perform ADF and KPSS tests and compile the results into a DataFrame
+def unit_root_tests(subsets):
+    results = []
+
+    for i, subset in enumerate(subsets, start=1):
+        adf_result = adfuller(subset, regression='ct', autolag='AIC')
+        kpss_result = kpss(subset, regression='ct', nlags=10)
+
+        adf_statistic, adf_p_value, adf_lags, _, adf_critical_values, _ = adf_result
+        kpss_statistic, kpss_p_value, kpss_lags, kpss_critical_values = kpss_result
+
+        adf_reject = 'rejected' if adf_p_value < 0.05 else 'not rejected'
+        kpss_reject = 'rejected' if kpss_p_value < 0.05 else 'not rejected'
+
+        results.append({
+            'ADF Statistic': adf_statistic,
+            'ADF P-Value': adf_p_value,
+            'ADF Lags': adf_lags,
+            'ADF H0: Unit root': adf_reject,
+            'KPSS Statistic': kpss_statistic,
+            'KPSS P-Value': kpss_p_value,
+            'KPSS Lags': kpss_lags,
+            'KPSS H0: No unit root': kpss_reject
+        })
+
+    return pd.DataFrame(results, index=[f'Subset {i}' for i in range(1, len(subsets) + 1)])
+
+# Perform ADF and KPSS tests for spot and futures prices
+spot_tests_df = unit_root_tests([subset1['spot'], subset2['spot'], subset3['spot'], subset4['spot'], subset5['spot'],
+                                 subset6['spot'], subset7['spot'], subset8['spot'], subset9['spot'], subset10['spot']])
+
+futures_tests_df = unit_root_tests([subset1['futures'], subset2['futures'], subset3['futures'], subset4['futures'],
+                                    subset5['futures'], subset6['futures'], subset7['futures'], subset8['futures'],
+                                    subset9['futures'], subset10['futures']])
+
+# Display the results
+print("Spot Prices Unit Root Tests:")
+print(spot_tests_df)
+print("\nFutures Prices Unit Root Tests:")
+print(futures_tests_df)
+
+#%%
+spot_tests_df.to_excel('spot_prices_unit_root_tests.xlsx')
+futures_tests_df.to_excel('futures_prices_unit_root_tests.xlsx')
+#%%
+# Step 5: Fit the VECM model
+model = VECM(subset1, k_ar_diff=2, deterministic = "co")
+result = model.fit()
+
+# Step 6: Inspect the results
+print(result.summary())
+result.gamma
+#%%
+from statsmodels.tsa.vector_ar.vecm import select_order
+from statsmodels.tsa.vector_ar.vecm import VECM
+
+
+def estimate_vecm(subset):
+    # Estimate lag order using information criteria
+    lag_order = select_order(subset, maxlags=15, deterministic='n', seasons=0)
+
+    # Fit VECM model with selected lag order
+    model = VECM(subset, k_ar_diff=lag_order.aic, deterministic='co')
+    result = model.fit()
+
+    # Extract loading coefficients (alphas) and their p-values
+    loading_pvalues = result.pvalues_alpha
+
+    return loading_pvalues
+
+#%%
+# Create an empty DataFrame to collect loading p-values
+loading_pvalues_df = pd.DataFrame()
+
+# Iterate over each subset
+for i in range(1, 11):
+    subset_name = f'subset{i}'
+    subset_data = globals()[subset_name]  # Access subset by its name
+
+    # Estimate VECM and collect loading p-values
+    loading_pvalues = estimate_vecm(subset_data)
+
+    # Append p-values to the DataFrame
+    loading_pvalues_df[f'subset{i}'] = loading_pvalues.flatten()
+
+# Print the DataFrame
+print("Loading P-values:")
+print(loading_pvalues_df)
+
+#%%
+import pandas as pd
+from statsmodels.tsa.vector_ar.vecm import coint_johansen
+from tabulate import tabulate
+
+# Assuming df is your DataFrame containing spot and futures prices
+
+subsets = {
+    "subset1": df.loc["June 27, 1988":"December 21, 1989"],
+    "subset2": df.loc["December 22, 1989":"July 07, 1992"],
+    "subset3": df.loc["July 08, 1992":"January 16, 1998"],
+    "subset4": df.loc["January 19, 1998":"April 18, 2002"],
+    "subset5": df.loc["April 19, 2002":"October 10, 2007"],
+    "subset6": df.loc["October 11, 2007":"May 11, 2010"],
+    "subset7": df.loc["May 12, 2010":"September 22, 2014"],
+    "subset8": df.loc["September 23, 2014":"August 21, 2017"],
+    "subset9": df.loc["August 22, 2017":"March 26, 2020"],
+    "subset10": df.loc["March 27, 2020":"April 08, 2024"]
+}
+
+order_integration_results = []
+
+# Iterate over subsets
+for subset_name, subset in subsets.items():
+    # Perform Johansen cointegration test
+    result = coint_johansen(subset, det_order=0, k_ar_diff=2)
+
+    # Calculate order of integration
+    order_of_integration = sum(result.cvt[0])
+
+    # Append results to list
+    order_integration_results.append([subset_name, order_of_integration])
+
+# Create table
+order_integration_table = pd.DataFrame(order_integration_results, columns=["Subset", "Order of Integration"])
+
+# Print table
+print("Order of Integration Table:")
+print(tabulate(order_integration_table, headers='keys', tablefmt='grid', showindex=False))
+
+#%%
+import pandas as pd
+from statsmodels.tsa.vector_ar.vecm import VECM
+from tabulate import tabulate
+
+# Assuming df is your DataFrame containing spot and futures prices
+
+subsets = {
+    "subset1": df.loc["June 27, 1988":"December 21, 1989"],
+    "subset2": df.loc["December 22, 1989":"July 07, 1992"],
+    "subset3": df.loc["July 08, 1992":"January 16, 1998"],
+    "subset4": df.loc["January 19, 1998":"April 18, 2002"],
+    "subset5": df.loc["April 19, 2002":"October 10, 2007"],
+    "subset6": df.loc["October 11, 2007":"May 11, 2010"],
+    "subset7": df.loc["May 12, 2010":"September 22, 2014"],
+    "subset8": df.loc["September 23, 2014":"August 21, 2017"],
+    "subset9": df.loc["August 22, 2017":"March 26, 2020"],
+    "subset10": df.loc["March 27, 2020":"April 08, 2024"]
+}
+
+order_integration_results = []
+
+# Iterate over subsets
+for subset_name, subset in subsets.items():
+    # Fit VECM model
+    model = VECM(subset, k_ar_diff=2)
+    result = model.fit()
+
+    # Extract cointegration rank
+    cointegration_rank = result.coint_rank
+
+    # Append results to list
+    order_integration_results.append([subset_name, cointegration_rank])
+
+# Create table
+order_integration_table = pd.DataFrame(order_integration_results, columns=["Subset", "Order of Integration"])
+
+# Print table
+print("Order of Integration Table:")
+print(tabulate(order_integration_table, headers='keys', tablefmt='grid', showindex=False))
+
+#%%
+import pandas as pd
+from statsmodels.tsa.vector_ar.vecm import coint_johansen
+from tabulate import tabulate
+
+# Assuming df is your DataFrame containing spot and futures prices
+
+subsets = {
+    "subset1": df.loc["June 27, 1988":"December 21, 1989"],
+    "subset2": df.loc["December 22, 1989":"July 07, 1992"],
+    "subset3": df.loc["July 08, 1992":"January 16, 1998"],
+    "subset4": df.loc["January 19, 1998":"April 18, 2002"],
+    "subset5": df.loc["April 19, 2002":"October 10, 2007"],
+    "subset6": df.loc["October 11, 2007":"May 11, 2010"],
+    "subset7": df.loc["May 12, 2010":"September 22, 2014"],
+    "subset8": df.loc["September 23, 2014":"August 21, 2017"],
+    "subset9": df.loc["August 22, 2017":"March 26, 2020"],
+    "subset10": df.loc["March 27, 2020":"April 08, 2024"]
+}
+
+results = []
+
+# Iterate over subsets
+for subset_name, subset in subsets.items():
+    # Perform Johansen cointegration test
+    result = coint_johansen(subset, det_order=-1, k_ar_diff=1)
+
+    # Extract trace test statistic and max eigenvalue test statistic
+    trace_statistic = result.lr1[0]
+    max_eigenvalue_statistic = result.lr2[0]
+
+    # Determine critical values
+    critical_values_trace = result.cvt[0, 0]  # Critical values for trace test (90%, 95%, 99%)
+    critical_values_max_eigenvalue = result.cvm[0, 0]  # Critical values for max eigenvalue test (90%, 95%, 99%)
+
+    # Determine order of integration based on cointegration rank
+    order_of_integration = result.ind[1]
+
+    # Append results to list
+    results.append([subset_name, trace_statistic, max_eigenvalue_statistic, order_of_integration])
+
+# Create table
+table_headers = ["Subset", f"Trace Statistic (Crit. val. {critical_values_trace})", f"Max Eigenvalue Statistic (Crit. val. {critical_values_max_eigenvalue})", "Order of Integration"]
+result_table = pd.DataFrame(results, columns=table_headers)
+
+# Print table
+print("Johansen Cointegration Test Results:")
+print(tabulate(result_table, headers='keys', tablefmt='grid', showindex=False))
+
+#%%
+import pandas as pd
+from statsmodels.tsa.vector_ar.vecm import VECM
+from tabulate import tabulate
+
+# Assuming df is your DataFrame containing spot and futures prices
+
+subsets = {
+    "subset1": df.loc["June 27, 1988":"December 21, 1989"],
+    "subset2": df.loc["December 22, 1989":"July 07, 1992"],
+    "subset3": df.loc["July 08, 1992":"January 16, 1998"],
+    "subset4": df.loc["January 19, 1998":"April 18, 2002"],
+    "subset5": df.loc["April 19, 2002":"October 10, 2007"],
+    "subset6": df.loc["October 11, 2007":"May 11, 2010"],
+    "subset7": df.loc["May 12, 2010":"September 22, 2014"],
+    "subset8": df.loc["September 23, 2014":"August 21, 2017"],
+    "subset9": df.loc["August 22, 2017":"March 26, 2020"],
+    "subset10": df.loc["March 27, 2020":"April 08, 2024"]
+}
+significance_results = []
+order_integration_results = []
+def estimate_vecm(subset):
+    # Estimate lag order using information criteria
+    lag_order = select_order(subset, maxlags=15, deterministic='lo', seasons=0)
+
+    # Fit VECM model with selected lag order
+    model = VECM(subset, k_ar_diff=lag_order.aic+1, deterministic='co')
+    result = model.fit()
+    return result
+
+# Iterate over subsets
+for subset_name, subset in subsets.items():
+    # Fit VECM model
+    result = estimate_vecm(subset)
+
+    # Extract results
+    cointegration_rank = result.coint_rank
+    lags = result.k_ar - 1
+    longrun_spot_infutures = result.alpha[0, 0]
+    long_p_infutures = result.pvalues_alpha[0, 0]
+    longrun_futures_inspot = result.alpha[1, 0]
+    long_p_inspot = result.pvalues_alpha[1, 0]
+
+
+
+    # Append results to list
+    order_integration_results.append([subset_name, cointegration_rank, lags, longrun_spot_infutures,  long_p_infutures, longrun_futures_inspot, long_p_inspot])
+
+# Create table
+vecm2 = pd.DataFrame(order_integration_results, columns=["Subset", "Cointegration Rank", "Lags", "Long run S->F", "p-value", "Long run F->S", "p-value"])
+
+# Print table
+print("Order of Integration Table:")
+print(tabulate(vecm2, headers='keys', tablefmt='grid', showindex=False))
+
+#%%
+lag_order = select_order(subset, maxlags=15, deterministic='co', seasons=0)
+model = VECM(subset1, k_ar_diff=2, deterministic='lo')
+r = model.fit()
+print(r.summary())
+r.pvalues_gamma
+#%%
+vecm2.to_excel('vecm2.xlsx')
+#%%
+import numpy as np
+import pandas as pd
+from statsmodels.tsa.vector_ar.vecm import VECM
+from tabulate import tabulate
+
+# Assuming df is your DataFrame containing spot and futures prices
+
+subsets = {
+    "subset1": df.loc["June 27, 1988":"December 21, 1989"],
+    "subset2": df.loc["December 22, 1989":"July 07, 1992"],
+    "subset3": df.loc["July 08, 1992":"January 16, 1998"],
+    "subset4": df.loc["January 19, 1998":"April 18, 2002"],
+    "subset5": df.loc["April 19, 2002":"October 10, 2007"],
+    "subset6": df.loc["October 11, 2007":"May 11, 2010"],
+    "subset7": df.loc["May 12, 2010":"September 22, 2014"],
+    "subset8": df.loc["September 23, 2014":"August 21, 2017"],
+    "subset9": df.loc["August 22, 2017":"March 26, 2020"],
+    "subset10": df.loc["March 27, 2020":"April 08, 2024"]
+}
+
+lag_results_futures = {}
+lag_results_spot = {}
+
+def estimate_vecm(subset):
+    # Estimate lag order using information criteria
+    lag_order = select_order(subset, maxlags=15, deterministic='co', seasons=0)
+
+    # Fit VECM model with selected lag order
+    model = VECM(subset, k_ar_diff=lag_order.aic+1, deterministic='lo')
+    result = model.fit()
+    return result
+
+# Iterate over subsets
+for subset_name, subset in subsets.items():
+    # Fit VECM model
+    result = estimate_vecm(subset)
+
+    # Check for statistical significance for each coefficient
+    significance_futures = result.pvalues_gamma[0, 1::2]
+    significance_spot = result.pvalues_gamma[1, ::2]
+
+    # Add significance results to dictionaries
+    lag_results_futures[subset_name] = significance_futures[:result.k_ar].tolist()
+    lag_results_spot[subset_name] = significance_spot[:result.k_ar].tolist()
+
+# Determine the number of lags
+num_lags = 15
+
+# Fill missing values with NaN to ensure consistency across subsets
+for subset_results in [lag_results_futures, lag_results_spot]:
+    for subset_name, results in subset_results.items():
+        subset_results[subset_name] += [np.nan] * (num_lags - len(results))
+
+# Create DataFrame for lag results for futures
+lag_table_futures = pd.DataFrame(lag_results_futures, index=range(1, num_lags + 1))
+
+# Create DataFrame for lag results for spot
+lag_table_spot = pd.DataFrame(lag_results_spot, index=range(1, num_lags + 1))
+
+# Replace NaN values with 'NaN' string for tabulate
+lag_table_futures.fillna('NaN', inplace=True)
+lag_table_spot.fillna('NaN', inplace=True)
+
+# Print tables for lag results for futures and spot
+print("Lag Results for Futures:")
+print(tabulate(lag_table_futures, headers='keys', tablefmt='grid'))
+print("\nLag Results for Spot:")
+print(tabulate(lag_table_spot, headers='keys', tablefmt='grid'))
+
+#%%
+basis = df['spot'] - df['futures']
+#%%
+import matplotlib.pyplot as plt
+
+# Plotting the time series with vertical lines for subset split dates
+plt.figure(figsize=(12, 6))
+
+# Plot the entire DataFrame
+plt.plot(basis.index, basis, color='blue', label='Your Variable')
+
+# Plot vertical lines for subset start dates
+subset_splits = [
+    "June 27, 1988", "December 21, 1989",
+    "December 22, 1989", "July 07, 1992",
+    "July 08, 1992", "January 16, 1998",
+    "January 19, 1998", "April 18, 2002",
+    "April 19, 2002", "October 10, 2007",
+    "October 11, 2007", "May 11, 2010",
+    "May 12, 2010", "September 22, 2014",
+    "September 23, 2014", "August 21, 2017",
+    "August 22, 2017", "March 26, 2020",
+]
+
+for split_date in subset_splits:
+    plt.axvline(x=split_date, color='red', linestyle='--')
+
+# Set x-axis ticks to show the first and last date of each subset
+subset_ticks = [subset_splits[0]] + subset_splits[1::2] + [subset_splits[-1]]
+plt.xticks(subset_ticks, rotation=45)
+plt.xlim(df.index[0], df.index[-1])
+
+# Add labels and legend
+plt.title('Brent crude daily basis values = Spot - Futures')
+plt.xlabel('June 27, 1988 - April 08, 2024')
+plt.ylabel('Dollar/Barrel')
+
+plt.savefig('brent_basis.png', bbox_inches='tight')
+# Show plot
+plt.tight_layout()
+plt.show()
+#%%
+x = basis.loc["June 27, 1988":"January 16, 1998"]
+plt.figure(figsize=(12, 6))
+
+# Plot the entire DataFrame
+plt.plot(x.index, x, color='blue', label='Your Variable')
+subset_ticks = [subset_splits[0]] + subset_splits[1::2] + [subset_splits[-1]]
+plt.xticks(subset_ticks, rotation=45)
+plt.xlim(df.index[0], df.index[-1])
+plt.show()
